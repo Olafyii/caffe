@@ -9,79 +9,97 @@
 #include "caffe/util/math_functions.hpp"
 #include <iostream>
 #include <cuda_runtime.h>
-#define TILE_WIDTH 16 
+#define TILE_WIDTH 16
+#define BLOCK_SIZE 16 
 namespace caffe {
 
 //-------------------------------------------------------------------------------------------------------------------------------------------
 template<typename T>
 __global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols)
 {
-  LOG(INFO) << ("Warm hug from my kernle. ln 19.\n");
-    const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  // LOG(INFO) << ("Warm hug from my kernle. ln 19.\n");
+  const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-    __shared__ T x_shared[BLOCK_SIZE];
+  __shared__ T x_shared[BLOCK_SIZE];
 
-    T y_val1 = 0.0;
-    T y_val2 = 0.0;
+  T y_val1 = 0.0;
+  T y_val2 = 0.0;
+
+  #pragma unroll
+  for (unsigned int m = 0; m < ((nCols + BLOCK_SIZE - 1)/ BLOCK_SIZE); ++m)
+  {
+    if ((m * BLOCK_SIZE + threadIdx.x) <  nCols) 
+      x_shared[threadIdx.x] = dx[threadIdx.x + m * BLOCK_SIZE];
+    else
+      x_shared[threadIdx.x] = 0.f;
+    __syncthreads();
 
     #pragma unroll
-    for (unsigned int m = 0; m < ((nCols + BLOCK_SIZE - 1)/ BLOCK_SIZE); ++m)
-    {
-        if ((m * BLOCK_SIZE + threadIdx.x) <  nCols) x_shared[threadIdx.x] = dx[threadIdx.x + m * BLOCK_SIZE];
-        else                                         x_shared[threadIdx.x] = 0.f;
-        __syncthreads();
-
-        #pragma unroll
-        for (unsigned int e = 0; e < BLOCK_SIZE; ++e) {
-            y_val1 += dA[tid + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
-            y_val2 += dA[tid + gridDim.x * BLOCK_SIZE + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
-        }
-
-        __syncthreads();
+    for (unsigned int e = 0; e < BLOCK_SIZE; ++e) {
+      y_val1 += dA[tid + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
+      y_val2 += dA[tid + gridDim.x * BLOCK_SIZE + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
     }
 
-    if (tid < nRows) dy[tid] = y_val1;
-    if ((tid + gridDim.x * BLOCK_SIZE) < nRows) dy[tid + gridDim.x * BLOCK_SIZE] = y_val2;
+    __syncthreads();
+  }
+
+  if (tid < nRows) dy[tid] = y_val1;
+  if ((tid + gridDim.x * BLOCK_SIZE) < nRows) dy[tid + gridDim.x * BLOCK_SIZE] = y_val2;
 
 }
 
 template <>
-void caffe_gpu_gemv<float>(const float* dA, const float* dx, float* dy, const unsigned int nRows, const unsigned int nCols) {
-      int size = sizeof(float);
-      LOG(INFO) << ("Warm hug from my func. ln 51.\n");
+void caffe_gpu_gemv<float>(const float* h_A, const float* h_x, float* h_y, const unsigned int nRows, const unsigned int nCols) {
+  int size = sizeof(float);
+  // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
+  LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
+  float *d_A;
+  float *d_x;
+  float *d_y;
+  cudaMalloc((void**)&d_A, nRows*nCols*size);
+  cudaMalloc((void**)&d_x, nCols*size);
+  cudaMalloc((void**)&d_y, nRows*size);
+  cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_x, h_x, nCols*size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_y, h_y, nRows*size, cudaMemcpyHostToDevice);
 
-      float *_dA;
-      float *_dx;
-      float *_dy;
-      cudaMalloc((void**)&_dA, nRows*nCols*size);
-      cudaMalloc((void**)&_dx, nCols*size);
-      cudaMalloc((void**)&_dy, nRows*size);
-      cudaMemcpy(_dA, dA, nRows*nCols*size, cudaMemcpyHostToDevice);
-      cudaMemcpy(_dx, dx, nCols*size, cudaMemcpyHostToDevice);
-      cudaMemcpy(_dy, dy, nRows*size, cudaMemcpyHostToDevice);
+  dim3 dim_grid((nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+  // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+  dim3 dim_block(BLOCK_SIZE);
+  // printf("block_size %d\n", BLOCK_SIZE);
+  matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(h_A, h_x, h_y, nRows, nCols);
+  cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
 
-      dim3 dim_grid((nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
-      dim3 dim_block(BLOCK_SIZE);
-      matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(dA, dx, dy, nRows, nCols);
+  cudaFree(d_A);
+  cudaFree(d_x);
+  cudaFree(d_y);
 }
 
 template <>
-void caffe_gpu_gemv<double>(const double* dA, const double* dx, double* dy, const unsigned int nRows, const unsigned int nCols) {
-      int size = sizeof(double);
+void caffe_gpu_gemv<double>(const double* h_A, const double* h_x, double* h_y, const unsigned int nRows, const unsigned int nCols) {
+  int size = sizeof(double);
+  // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
+  LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
+  double *d_A;
+  double *d_x;
+  double *d_y;
+  cudaMalloc((void**)&d_A, nRows*nCols*size);
+  cudaMalloc((void**)&d_x, nCols*size);
+  cudaMalloc((void**)&d_y, nRows*size);
+  cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_x, h_x, nCols*size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_y, h_y, nRows*size, cudaMemcpyHostToDevice);
 
-      double *_dA;
-      double *_dx;
-      double *_dy;
-      cudaMalloc((void**)&_dA, nRows*nCols*size);
-      cudaMalloc((void**)&_dx, nCols*size);
-      cudaMalloc((void**)&_dy, nRows*size);
-      cudaMemcpy(_dA, dA, nRows*nCols*size, cudaMemcpyHostToDevice);
-      cudaMemcpy(_dx, dx, nCols*size, cudaMemcpyHostToDevice);
-      cudaMemcpy(_dy, dy, nRows*size, cudaMemcpyHostToDevice);
+  dim3 dim_grid((nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+  // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+  dim3 dim_block(BLOCK_SIZE);
+  // printf("block_size %d\n", BLOCK_SIZE);
+  matvec_kernel_ILP2<double> <<<dim_grid, dim_block>>>(h_A, h_x, h_y, nRows, nCols);
+  cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
 
-      dim3 dim_grid((nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
-      dim3 dim_block(BLOCK_SIZE);
-      matvec_kernel_ILP2<double> <<<dim_grid, dim_block>>>(dA, dx, dy, nRows, nCols);
+  cudaFree(d_A);
+  cudaFree(d_x);
+  cudaFree(d_y);
 }
 //-------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -105,10 +123,10 @@ void caffe_gpu_gemv<double>(const double* dA, const double* dx, double* dy, cons
 
 
 
+using namespace std;
 template<typename Dtype>
 __global__ void MatrixMulKernle(int m, int n, int k, Dtype *A,Dtype  *B, Dtype *C,bool IsAdd_C,bool TransA,bool TransB)
 {
-  // printf("hello from math_functions.cu line 19\n");
     //申请共享内存，存在于每个block中
   __shared__ Dtype ds_A[TILE_WIDTH][TILE_WIDTH]; 
   __shared__ Dtype ds_B[TILE_WIDTH][TILE_WIDTH];
@@ -124,7 +142,8 @@ __global__ void MatrixMulKernle(int m, int n, int k, Dtype *A,Dtype  *B, Dtype *
   //临时变量
   Dtype Cvalue=0;
 
-
+  
+  
   //循环读入A,B瓦片，计算结果矩阵，分阶段进行计算
   for (int t=0; t<(n-1)/TILE_WIDTH+1; ++t)
   {
@@ -156,7 +175,7 @@ __global__ void MatrixMulKernle(int m, int n, int k, Dtype *A,Dtype  *B, Dtype *
         // printf("%f ",ds_B[ty][tx]);
         ds_B[ty][tx] = B[(t*TILE_WIDTH + ty)+Col*n];
         // printf("%f\n",ds_B[ty][tx]);
-        
+       
 
       }
     else
@@ -165,26 +184,56 @@ __global__ void MatrixMulKernle(int m, int n, int k, Dtype *A,Dtype  *B, Dtype *
     //保证tile中所有的元素被加载
     __syncthreads();
     
-    for (int i = 0; i < TILE_WIDTH; ++i){
-      if (IsAdd_C==0){
-        Cvalue += ds_A[ty][i] * ds_B[i][tx];//从shared memory中取值
-
-      }
-      else{
-        if(Row < m && Col < k)          
-          C[k*Row+Col]+= ds_A[ty][i] * ds_B[i][tx];
-}
+    if (IsAdd_C==0){
+      Cvalue+=(ds_A[ty][0]*ds_B[0][tx]+ds_A[ty][1]*ds_B[1][tx]+ds_A[ty][2]*ds_B[2][tx]+ds_A[ty][3]*ds_B[3][tx]+ \
+        ds_A[ty][4]*ds_B[4][tx]+ds_A[ty][5]*ds_B[5][tx]+ds_A[ty][6]*ds_B[6][tx]+ds_A[ty][7]*ds_B[7][tx]+ \
+        ds_A[ty][8]*ds_B[8][tx]+ds_A[ty][9]*ds_B[9][tx]+ds_A[ty][10]*ds_B[10][tx]+ds_A[ty][11]*ds_B[11][tx]+ \
+        ds_A[ty][12]*ds_B[12][tx]+ds_A[ty][13]*ds_B[13][tx]+ds_A[ty][14]*ds_B[14][tx]+ds_A[ty][15]*ds_B[15][tx]);
     }
-    
-  
-    //确保所有线程完成计算后，进行下一个阶段的计算
+    else{
+      C[k*Row+Col]+=(ds_A[ty][0]*ds_B[0][tx]+ds_A[ty][1]*ds_B[1][tx]+ds_A[ty][2]*ds_B[2][tx]+ds_A[ty][3]*ds_B[3][tx]+ \
+        ds_A[ty][4]*ds_B[4][tx]+ds_A[ty][5]*ds_B[5][tx]+ds_A[ty][6]*ds_B[6][tx]+ds_A[ty][7]*ds_B[7][tx]+ \
+        ds_A[ty][8]*ds_B[8][tx]+ds_A[ty][9]*ds_B[9][tx]+ds_A[ty][10]*ds_B[10][tx]+ds_A[ty][11]*ds_B[11][tx]+ \
+        ds_A[ty][12]*ds_B[12][tx]+ds_A[ty][13]*ds_B[13][tx]+ds_A[ty][14]*ds_B[14][tx]+ds_A[ty][15]*ds_B[15][tx]);
+    }
+
     __syncthreads();
     if (IsAdd_C==0){
       if(Row < m && Col < k){
+        // C[Col*m+Row]=Cvalue;
         C[k*Row+Col]=Cvalue;
 
       }
     }
+
+    // for (int i = 0; i < TILE_WIDTH; ++i){
+    //   if (IsAdd_C==0){
+    //     Cvalue += ds_A[ty][i] * ds_B[i][tx];//从shared memory中取值
+
+    //   }
+    //   else{
+    //     if(Row < m && Col < k)
+    //       // C[Col*m+Row]+= ds_A[ty][i] * ds_B[i][tx];
+    //       C[k*Row+Col]+= ds_A[ty][i] * ds_B[i][tx];
+
+    //   }
+    // }
+    
+  
+    // //确保所有线程完成计算后，进行下一个阶段的计算
+    // __syncthreads();
+    // if (IsAdd_C==0){
+    //   if(Row < m && Col < k){
+    //     // C[Col*m+Row]=Cvalue;
+    //     C[k*Row+Col]=Cvalue;
+
+    //   }
+    // }
+
+
+
+
+
     // if(Row < m && Col < k){
     //   if (IsAdd_C==0){
     //     C[Col*m+Row]=Cvalue;
@@ -322,6 +371,7 @@ template <>
 void caffe_gpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int M,
     const int N, const float alpha, const float* A, const float* x,
     const float beta, float* y) {
+      // LOG(INFO) << ("caffe_gpu_gemv invoked in math_functions.cu.\n");
   cublasOperation_t cuTransA =
       (TransA == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
   CUBLAS_CHECK(cublasSgemv(Caffe::cublas_handle(), cuTransA, N, M, &alpha,

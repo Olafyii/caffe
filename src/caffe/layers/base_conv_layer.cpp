@@ -340,6 +340,8 @@ void BaseConvolutionLayer<Dtype>::forward_gpu_gemm(const Dtype* input,
     caffe_gpu_gemm<Dtype>(conv_out_channels_ / group_, kernel_dim_,conv_out_spatial_dim_, 
     weights + weight_offset_ * g, col_buff + col_offset_ * g, output + output_offset_ * g,
     false,false,false);//lzy
+
+
     // caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
     //     group_, conv_out_spatial_dim_, kernel_dim_,
     //     (Dtype)1., weights + weight_offset_ * g, col_buff + col_offset_ * g,
@@ -350,8 +352,6 @@ void BaseConvolutionLayer<Dtype>::forward_gpu_gemm(const Dtype* input,
 template <typename Dtype>
 void BaseConvolutionLayer<Dtype>::forward_gpu_bias(Dtype* output,
     const Dtype* bias) {
-      // LOG(INFO) << "warm hug from base_conv_layer.cpp ln 353.\n";
-  // printf("outside wyiyi\n");
   caffe_gpu_gemm<Dtype>(num_output_, 1,out_spatial_dim_, 
   bias, bias_multiplier_.gpu_data(), output,true,false,false);//lzy
 
@@ -373,7 +373,6 @@ void BaseConvolutionLayer<Dtype>::backward_gpu_gemm(const Dtype* output,
     caffe_gpu_gemm<Dtype>(kernel_dim_, conv_out_channels_ / group_,conv_out_spatial_dim_, 
     weights + weight_offset_ * g, output + output_offset_ * g, col_buff + col_offset_ * g,
     false,true,false);//lzy
-    //question here
 
     // caffe_gpu_gemm<Dtype>(CblasTrans, CblasNoTrans, kernel_dim_,
     //     conv_out_spatial_dim_, conv_out_channels_ / group_,
@@ -395,7 +394,6 @@ void BaseConvolutionLayer<Dtype>::weight_gpu_gemm(const Dtype* input,
     col_buff = col_buffer_.gpu_data();
   }
   for (int g = 0; g < group_; ++g) {
-    // printf("fuck!");
     caffe_gpu_gemm<Dtype>(conv_out_channels_ / group_,conv_out_spatial_dim_,kernel_dim_,
     output + output_offset_ * g,col_buff + col_offset_ * g,weights + weight_offset_ * g,
     true,false,true);
@@ -410,15 +408,15 @@ void BaseConvolutionLayer<Dtype>::weight_gpu_gemm(const Dtype* input,
 template <typename Dtype>
 void BaseConvolutionLayer<Dtype>::backward_gpu_bias(Dtype* bias,
     const Dtype* input) {
-  // caffe_gpu_gemv<Dtype>(CblasNoTrans, num_output_, out_spatial_dim_, 1.,
-  //     input, bias_multiplier_.gpu_data(), 1., bias);
+  caffe_gpu_gemv<Dtype>(CblasNoTrans, num_output_, out_spatial_dim_, 1.,
+      input, bias_multiplier_.gpu_data(), 1., bias);
 
   // caffe_gpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int M,
   //   const int N, const float alpha, const float* A, const float* x,
   //   const float beta, float* y)
-  printf("warm hug from base_conv_layer.cpp ln 415.\n");
-  LOG(INFO) << "warm hug from base_conv_layer.cpp ln 415.\n";
-  caffe_gpu_gemv<Dtype>(input, bias_multiplier_.gpu_data(), bias, num_output_, out_spatial_dim_);
+  // printf("warm hug from base_conv_layer.cpp ln 415.\n");
+  // LOG(INFO) << "warm hug from base_conv_layer.cpp ln 415.\n";
+  // caffe_gpu_gemv<Dtype>(input, bias_multiplier_.gpu_data(), bias, num_output_, out_spatial_dim_);
 }
 
 #endif  // !CPU_ONLY
