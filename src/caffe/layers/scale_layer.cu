@@ -105,7 +105,7 @@ void ScaleLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
         // LOG(FATAL) << "invoked scale_layer.cu ln104."
 
         LOG(INFO) << "Before invoke my caffe_gpu_gemv in scale_layer.cu\n";
-        caffe_gpu_gemv(product, sum_mult, sum_result, sum_result_.count(), inner_dim_);
+        caffe_gpu_gemv(product, sum_mult, sum_result, sum_result_.count(), inner_dim_, Dtype(1));
       }
       if (outer_dim_ != 1) {
         const Dtype* sum_mult = sum_multiplier_.gpu_data();
@@ -129,7 +129,7 @@ void ScaleLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
           //   const float beta, float* y)
 
           LOG(INFO) << "Before invoke my caffe_gpu_gemv in scale_layer.cu\n";
-          caffe_gpu_gemv(sum_result, sum_mult, scale_diff, outer_dim_, scale_dim_);
+          caffe_gpu_gemv(sum_result, sum_mult, scale_diff, outer_dim_, scale_dim_, Dtype(1));
         }
       }
     }

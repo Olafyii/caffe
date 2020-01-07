@@ -33,9 +33,9 @@ void caffe_gpu_gemm(const int M, const int N, const int K,
 
 //-------------------------------------------------------------------------------------------------------------------------------------------
 template<typename T>
-__global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols);
+__global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols, const T alpha);
 template <typename T>
-void caffe_gpu_gemv(const T* dA, const T* dx, T* dy, const unsigned int nRows, const unsigned int nCols);
+void caffe_gpu_gemv(const T* dA, const T* dx, T* dy, const unsigned int nRows, const unsigned int nCols, const T alpha);
 //-------------------------------------------------------------------------------------------------------------------------------------------
 
 

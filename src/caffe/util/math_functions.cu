@@ -15,7 +15,7 @@ namespace caffe {
 
 //-------------------------------------------------------------------------------------------------------------------------------------------
 template<typename T>
-__global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols)
+__global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols, const T alpha)
 {
   // LOG(INFO) << ("Warm hug from my kernle. ln 19.\n");
   const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -43,16 +43,16 @@ __global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restri
     __syncthreads();
   }
 
-  if (tid < nRows) dy[tid] = y_val1;
-  if ((tid + gridDim.x * BLOCK_SIZE) < nRows) dy[tid + gridDim.x * BLOCK_SIZE] = y_val2;
+  if (tid < nRows) dy[tid] = y_val1 * alpha;
+  if ((tid + gridDim.x * BLOCK_SIZE) < nRows) dy[tid + gridDim.x * BLOCK_SIZE] = y_val2 * alpha;
 
 }
 
 template <>
-void caffe_gpu_gemv<float>(const float* h_A, const float* h_x, float* h_y, const unsigned int nRows, const unsigned int nCols) {
+void caffe_gpu_gemv<float>(const float* h_A, const float* h_x, float* h_y, const unsigned int nRows, const unsigned int nCols, const float alpha) {
   int size = sizeof(float);
   // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
-  LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
+  // LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
   float *d_A;
   float *d_x;
   float *d_y;
@@ -67,7 +67,7 @@ void caffe_gpu_gemv<float>(const float* h_A, const float* h_x, float* h_y, const
   // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
   dim3 dim_block(BLOCK_SIZE);
   // printf("block_size %d\n", BLOCK_SIZE);
-  matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(h_A, h_x, h_y, nRows, nCols);
+  matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha);
   cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
 
   cudaFree(d_A);
@@ -76,10 +76,10 @@ void caffe_gpu_gemv<float>(const float* h_A, const float* h_x, float* h_y, const
 }
 
 template <>
-void caffe_gpu_gemv<double>(const double* h_A, const double* h_x, double* h_y, const unsigned int nRows, const unsigned int nCols) {
+void caffe_gpu_gemv<double>(const double* h_A, const double* h_x, double* h_y, const unsigned int nRows, const unsigned int nCols, const double alpha) {
   int size = sizeof(double);
   // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
-  LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
+  // LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
   double *d_A;
   double *d_x;
   double *d_y;
@@ -94,7 +94,7 @@ void caffe_gpu_gemv<double>(const double* h_A, const double* h_x, double* h_y, c
   // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
   dim3 dim_block(BLOCK_SIZE);
   // printf("block_size %d\n", BLOCK_SIZE);
-  matvec_kernel_ILP2<double> <<<dim_grid, dim_block>>>(h_A, h_x, h_y, nRows, nCols);
+  matvec_kernel_ILP2<double> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha);
   cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
 
   cudaFree(d_A);
