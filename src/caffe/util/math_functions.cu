@@ -192,7 +192,7 @@ namespace caffe {
 template <typename T>
 __global__ void axpby_kernel(const int N, const T alpha, const T beta, const T*  X, T*  Y){
     CUDA_KERNEL_LOOP(i, N){
-      if (i < N)
+      // if (i < N)
         Y[i] = X[i]*alpha + Y[i]*beta;
     }
 }
@@ -234,7 +234,7 @@ template <typename T>
 __global__ void scale_kernel(const int N, const T alpha, const T*  X, T* Y){
     const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     CUDA_KERNEL_LOOP(i, N){
-      if (i < N)
+      // if (i < N)
         Y[i] = X[i]*alpha;
     }
 }
@@ -274,7 +274,7 @@ template <typename T>
 __global__ void axpy_kernel(const int N, const T alpha, const T*  X, T*  Y){
     const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     CUDA_KERNEL_LOOP(i, N){
-      if (i < N)
+      // if (i < N)
         Y[i] = X[i]*alpha + Y[i];
     }
 }
@@ -315,7 +315,7 @@ void kk_gpu_axpy<double>(const int N, const double alpha, const double* X, doubl
 template <typename T>
 __global__ void dot_kernel(const int N, const T* X, const T* Y, T* res){
     CUDA_KERNEL_LOOP(i, N){
-      if (i < N)
+      // if (i < N)
         res[i] = X[i]*Y[i];
     }
 }
