@@ -41,7 +41,7 @@ void kk_gpu_dot(const int N, const T* X, const T* Y, T* res);
 template <typename T>
 void kk_gpu_axpby(const int N, const T alpha, const T beta, const T* X, T* Y);
 template <typename T>
-void kk_gpu_scale(const int N, const T alpha, T* X);
+void kk_gpu_scale(const int N, const float alpha, const float* X, float* Y);
 template <typename T>
 void kk_gpu_axpy(const int N, const T alpha, const T* X, T* Y);
 //-------------------------------------------------------------------------------------------------------------------------------------------
