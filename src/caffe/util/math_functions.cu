@@ -13,99 +13,350 @@
 #define BLOCK_SIZE 16 
 namespace caffe {
 
-//-------------------------------------------------------------------------------------------------------------------------------------------
-template<typename T>
-__global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols, const T alpha)
-{
-  // LOG(INFO) << ("Warm hug from my kernle. ln 19.\n");
-  const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-
-  __shared__ T x_shared[BLOCK_SIZE];
-
-  T y_val1 = 0.0;
-  T y_val2 = 0.0;
-
-  #pragma unroll
-  for (unsigned int m = 0; m < ((nCols + BLOCK_SIZE - 1)/ BLOCK_SIZE); ++m)
+  //gemv-------------------------------------------------------------------------------------------------------------------------------------------
+  template<typename T>
+  __global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols, const T alpha, const bool trans)
   {
-    if ((m * BLOCK_SIZE + threadIdx.x) <  nCols) 
-      x_shared[threadIdx.x] = dx[threadIdx.x + m * BLOCK_SIZE];
-    else
-      x_shared[threadIdx.x] = 0.f;
-    __syncthreads();
-
+    // LOG(INFO) << ("Warm hug from my kernle. ln 19.\n");
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  
+    // printf("%d %d %d %d\n",  tid, threadIdx.x, blockIdx.x, blockDim.x);
+    // printf("sdfasdf %d\n", gridDim.x * BLOCK_SIZE);
+    // printf("%d\t%d\t%d\t%d\t\n", blockIdx.x, blockIdx.y,threadIdx.x,threadIdx.y);
+  
+    __shared__ T x_shared[BLOCK_SIZE];
+  
+    T y_val1 = 0.0;
+    T y_val2 = 0.0;
+  
+    int tmp;
+    if (trans) {tmp = ((nRows + BLOCK_SIZE - 1)/ BLOCK_SIZE);}
+    else {tmp = ((nCols + BLOCK_SIZE - 1)/ BLOCK_SIZE);  }
+  
     #pragma unroll
-    for (unsigned int e = 0; e < BLOCK_SIZE; ++e) {
-      y_val1 += dA[tid + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
-      y_val2 += dA[tid + gridDim.x * BLOCK_SIZE + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
+    for (unsigned int m = 0; m < tmp; ++m)
+    {
+      if (trans){
+        if ((m * BLOCK_SIZE + threadIdx.x) <  nRows) 
+          x_shared[threadIdx.x] = dx[threadIdx.x + m * BLOCK_SIZE];
+        else
+          x_shared[threadIdx.x] = 0.f;
+      }
+      else{
+        if ((m * BLOCK_SIZE + threadIdx.x) <  nCols) 
+          x_shared[threadIdx.x] = dx[threadIdx.x + m * BLOCK_SIZE];
+        else
+          x_shared[threadIdx.x] = 0.f;
+      }
+      
+      __syncthreads();
+  
+      #pragma unroll
+      for (unsigned int e = 0; e < BLOCK_SIZE; ++e) {
+        if (trans){
+          if ((tid) * nRows + (e + BLOCK_SIZE * m) < nRows*nCols){
+            y_val1 += dA[(tid) * nRows + (e + BLOCK_SIZE * m)] * x_shared[e];
+          }
+          if ((tid + gridDim.x * BLOCK_SIZE) * nRows + (e + BLOCK_SIZE * m) < nRows*nCols){
+            y_val2 += dA[(tid + gridDim.x * BLOCK_SIZE) * nRows + (e + BLOCK_SIZE * m)] * x_shared[e];
+          }
+        }
+        else{
+          if (tid + (e + BLOCK_SIZE * m) * nRows < nRows*nCols){
+            y_val1 += dA[tid + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
+          }
+          if (tid + gridDim.x * BLOCK_SIZE + (e + BLOCK_SIZE * m) * nRows < nRows*nCols){
+            y_val2 += dA[tid + gridDim.x * BLOCK_SIZE + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
+          } 
+        }
+      }
+  
+      __syncthreads();
     }
-
-    __syncthreads();
+    if (trans){
+      if (tid < nCols) dy[tid] = y_val1 * alpha;
+      if ((tid + gridDim.x * BLOCK_SIZE) < nCols) dy[tid + gridDim.x * BLOCK_SIZE] = y_val2 * alpha;
+    }
+    else{
+      if (tid < nRows) dy[tid] = y_val1 * alpha;
+      if ((tid + gridDim.x * BLOCK_SIZE) < nRows) dy[tid + gridDim.x * BLOCK_SIZE] = y_val2 * alpha;
+    }
   }
-
-  if (tid < nRows) dy[tid] = y_val1 * alpha;
-  if ((tid + gridDim.x * BLOCK_SIZE) < nRows) dy[tid + gridDim.x * BLOCK_SIZE] = y_val2 * alpha;
-
+  
+  template <>
+  void kk_gpu_gemv<float>(const float* h_A, const float* h_x, float* h_y, const unsigned int nRows, const unsigned int nCols, const float alpha, const bool trans) {
+    int size = sizeof(float);
+    // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
+    // LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
+    float *d_A;
+    float *d_x;
+    float *d_y;
+    if (trans){
+      cudaMalloc((void**)&d_A, nRows*nCols*size);
+      cudaMalloc((void**)&d_x, nRows*size);
+      cudaMalloc((void**)&d_y, nCols*size);
+      cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_x, h_x, nRows*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_y, h_y, nCols*size, cudaMemcpyHostToDevice);
+    }
+    else{
+      cudaMalloc((void**)&d_A, nRows*nCols*size);
+      cudaMalloc((void**)&d_x, nCols*size);
+      cudaMalloc((void**)&d_y, nRows*size);
+      cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_x, h_x, nCols*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_y, h_y, nRows*size, cudaMemcpyHostToDevice);
+    }
+    
+    if (trans){
+      dim3 dim_grid(((nCols+1)/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      dim3 dim_block(BLOCK_SIZE);
+      matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha, trans);
+      cudaMemcpy(h_y, d_y, nCols*size, cudaMemcpyDeviceToHost);
+    }
+    else{
+      dim3 dim_grid(((nRows+1)/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      dim3 dim_block(BLOCK_SIZE); 
+      matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha, trans);
+      cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
+    }
+    // printf("block_size %d\n", BLOCK_SIZE);
+    // if (trans){
+    //   matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nCols, nRows, alpha);
+    //   cudaMemcpy(h_y, d_y, nCols*size, cudaMemcpyDeviceToHost);
+    // }
+    // else{
+    // }
+  
+    cudaFree(d_A);
+    cudaFree(d_x);
+    cudaFree(d_y);
+  }
+  
+  template <>
+  void kk_gpu_gemv<double>(const double* h_A, const double* h_x, double* h_y, const unsigned int nRows, const unsigned int nCols, const double alpha, const bool trans) {
+    int size = sizeof(double);
+    // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
+    // LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
+    double *d_A;
+    double *d_x;
+    double *d_y;
+    if (trans){
+      cudaMalloc((void**)&d_A, nRows*nCols*size);
+      cudaMalloc((void**)&d_x, nRows*size);
+      cudaMalloc((void**)&d_y, nCols*size);
+      cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_x, h_x, nRows*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_y, h_y, nCols*size, cudaMemcpyHostToDevice);
+    }
+    else{
+      cudaMalloc((void**)&d_A, nRows*nCols*size);
+      cudaMalloc((void**)&d_x, nCols*size);
+      cudaMalloc((void**)&d_y, nRows*size);
+      cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_x, h_x, nCols*size, cudaMemcpyHostToDevice);
+      cudaMemcpy(d_y, h_y, nRows*size, cudaMemcpyHostToDevice);
+    }
+    
+    if (trans){
+      dim3 dim_grid(((nCols+1)/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      dim3 dim_block(BLOCK_SIZE);
+      matvec_kernel_ILP2<double> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha, trans);
+      cudaMemcpy(h_y, d_y, nCols*size, cudaMemcpyDeviceToHost);
+    }
+    else{
+      dim3 dim_grid(((nRows+1)/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
+      dim3 dim_block(BLOCK_SIZE); 
+      matvec_kernel_ILP2<double> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha, trans);
+      cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
+    }
+    // printf("block_size %d\n", BLOCK_SIZE);
+    // if (trans){
+    //   matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nCols, nRows, alpha);
+    //   cudaMemcpy(h_y, d_y, nCols*size, cudaMemcpyDeviceToHost);
+    // }
+    // else{
+    // }
+  
+    cudaFree(d_A);
+    cudaFree(d_x);
+    cudaFree(d_y);
+  }
+  //gemv-------------------------------------------------------------------------------------------------------------------------------------------
+  
+//axpby
+template <typename T>
+__global__ void axpby_kernel(const int N, const T alpha, const T beta, const T*  X, T*  Y){
+    CUDA_KERNEL_LOOP(i, N){
+      if (i < N)
+        Y[i] = X[i]*alpha + Y[i]*beta;
+    }
 }
 
 template <>
-void caffe_gpu_gemv<float>(const float* h_A, const float* h_x, float* h_y, const unsigned int nRows, const unsigned int nCols, const float alpha) {
-  int size = sizeof(float);
-  // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
-  // LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
-  float *d_A;
-  float *d_x;
-  float *d_y;
-  cudaMalloc((void**)&d_A, nRows*nCols*size);
-  cudaMalloc((void**)&d_x, nCols*size);
-  cudaMalloc((void**)&d_y, nRows*size);
-  cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_x, h_x, nCols*size, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_y, h_y, nRows*size, cudaMemcpyHostToDevice);
+void kk_gpu_axpby<float>(const int N, const float alpha, const float beta, const float* X, float* Y){
+    float *d_X, *d_Y;
+    size_t size = N*sizeof(float);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Y, Y, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    axpby_kernel<float> <<<dim_grid, dim_block>>>(N, alpha, beta, d_X, d_Y);
+    cudaMemcpy(Y, d_Y, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+}
+template <>
+void kk_gpu_axpby<double>(const int N, const double alpha, const double beta, const double* X, double* Y){
+  double *d_X, *d_Y;
+    size_t size = N*sizeof(double);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Y, Y, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    axpby_kernel<double> <<<dim_grid, dim_block>>>(N, alpha, beta, d_X, d_Y);
+    cudaMemcpy(Y, d_Y, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+}
+//axpby
 
-  dim3 dim_grid((nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
-  // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
-  dim3 dim_block(BLOCK_SIZE);
-  // printf("block_size %d\n", BLOCK_SIZE);
-  matvec_kernel_ILP2<float> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha);
-  cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
-
-  cudaFree(d_A);
-  cudaFree(d_x);
-  cudaFree(d_y);
+//scale
+template <typename T>
+__global__ void scale_kernel(const int N, const T alpha, const T*  X, T* Y){
+    const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    CUDA_KERNEL_LOOP(i, N){
+      if (i < N)
+        Y[i] = X[i]*alpha;
+    }
 }
 
 template <>
-void caffe_gpu_gemv<double>(const double* h_A, const double* h_x, double* h_y, const unsigned int nRows, const unsigned int nCols, const double alpha) {
-  int size = sizeof(double);
-  // LOG(INFO) << ("Warm hug from my func. ln 51.\n");
-  // LOG(INFO) << ("My caffe_gpu_gemv invoked in math_functions.cu.\n");
-  double *d_A;
-  double *d_x;
-  double *d_y;
-  cudaMalloc((void**)&d_A, nRows*nCols*size);
-  cudaMalloc((void**)&d_x, nCols*size);
-  cudaMalloc((void**)&d_y, nRows*size);
-  cudaMemcpy(d_A, h_A, nRows*nCols*size, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_x, h_x, nCols*size, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_y, h_y, nRows*size, cudaMemcpyHostToDevice);
-
-  dim3 dim_grid((nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
-  // printf("grid size %d\n", (nRows/2 + BLOCK_SIZE -1)/ BLOCK_SIZE);
-  dim3 dim_block(BLOCK_SIZE);
-  // printf("block_size %d\n", BLOCK_SIZE);
-  matvec_kernel_ILP2<double> <<<dim_grid, dim_block>>>(d_A, d_x, d_y, nRows, nCols, alpha);
-  cudaMemcpy(h_y, d_y, nRows*size, cudaMemcpyDeviceToHost);
-
-  cudaFree(d_A);
-  cudaFree(d_x);
-  cudaFree(d_y);
+void kk_gpu_scale<float>(const int N, const float alpha, const float* X, float* Y){
+    float *d_X, *d_Y;
+    size_t size = N*sizeof(float);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    scale_kernel<float> <<<dim_grid, dim_block>>>(N, alpha, d_X, d_Y);
+    cudaMemcpy(Y, d_Y, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
 }
-//-------------------------------------------------------------------------------------------------------------------------------------------
+template <>
+void kk_gpu_scale<double>(const int N, const double alpha, const double* X, double* Y){
+    double *d_X, *d_Y;
+    size_t size = N*sizeof(double);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    scale_kernel<double> <<<dim_grid, dim_block>>>(N, alpha, d_X, d_Y);
+    cudaMemcpy(Y, d_Y, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+}
+//scale
 
+//axpy
+template <typename T>
+__global__ void axpy_kernel(const int N, const T alpha, const T*  X, T*  Y){
+    const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    CUDA_KERNEL_LOOP(i, N){
+      if (i < N)
+        Y[i] = X[i]*alpha + Y[i];
+    }
+}
 
+template <>
+void kk_gpu_axpy<float>(const int N, const float alpha, const float* X, float* Y){
+    float *d_X, *d_Y;
+    size_t size = N*sizeof(float);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Y, Y, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    axpy_kernel<float> <<<dim_grid, dim_block>>>(N, alpha, d_X, d_Y);
+    cudaMemcpy(Y, d_Y, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+}
+template <>
+void kk_gpu_axpy<double>(const int N, const double alpha, const double* X, double* Y){
+    double *d_X, *d_Y;
+    size_t size = N*sizeof(double);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Y, Y, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    axpy_kernel<double> <<<dim_grid, dim_block>>>(N, alpha, d_X, d_Y);
+    cudaMemcpy(Y, d_Y, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+}
+//axpy
 
+//dot
+template <typename T>
+__global__ void dot_kernel(const int N, const T* X, const T* Y, T* res){
+    CUDA_KERNEL_LOOP(i, N){
+      if (i < N)
+        res[i] = X[i]*Y[i];
+    }
+}
 
+template <>
+void kk_gpu_dot<float>(const int N, const float* X, const float* Y, float* res){
+    float *d_X, *d_Y, *d_res;
+    size_t size = N*sizeof(float);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMalloc((void**)&d_res, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Y, Y, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_res, res, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    dot_kernel<float> <<<dim_grid, dim_block>>>(N, d_X, d_Y, d_res);
+    cudaMemcpy(res, d_res, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+    cudaFree(d_res);
+}
+template <>
+void kk_gpu_dot<double>(const int N, const double* X, const double* Y, double* res){
+  double *d_X, *d_Y, *d_res;
+    size_t size = N*sizeof(double);
+    cudaMalloc((void**)&d_X, size);
+    cudaMalloc((void**)&d_Y, size);
+    cudaMalloc((void**)&d_res, size);
+    cudaMemcpy(d_X, X, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Y, Y, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_res, res, size, cudaMemcpyHostToDevice);
+    dim3 dim_grid((N+BLOCK_SIZE)/BLOCK_SIZE);
+    dim3 dim_block(BLOCK_SIZE);
+    dot_kernel<double> <<<dim_grid, dim_block>>>(N, d_X, d_Y, d_res);
+    cudaMemcpy(res, d_res, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_X);
+    cudaFree(d_Y);
+    cudaFree(d_res);
+}
+//dot
 
 
 

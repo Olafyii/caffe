@@ -87,25 +87,21 @@ void ScaleLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
         Dtype* scale_diff = scale->mutable_cpu_diff();
         if (scale_param) {
           Dtype result;
-          caffe_gpu_dot(inner_dim_, product, sum_mult, &result);
+          // caffe_gpu_dot(inner_dim_, product, sum_mult, &result);
+          kk_gpu_dot(inner_dim_, product, sum_mult, &result);
           *scale_diff += result;
         } else {
-          caffe_gpu_dot(inner_dim_, product, sum_mult, scale_diff);
+          // caffe_gpu_dot(inner_dim_, product, sum_mult, scale_diff);
+          kk_gpu_dot(inner_dim_, product, sum_mult, scale_diff);
         }
       } else {
         const Dtype* sum_mult = sum_multiplier_.gpu_data();
         sum_result = (outer_dim_ == 1) ?
             scale->mutable_gpu_diff() : sum_result_.mutable_gpu_data();
-        // LOG(INFO) << "Before invoke caffe_gpu_gemv in scale_layer.cu\n";
+        
         // caffe_gpu_gemv(CblasNoTrans, sum_result_.count(), inner_dim_,
         //                Dtype(1), product, sum_mult, Dtype(0), sum_result);
-        // caffe_gpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int M,
-        //   const int N, const float alpha, const float* A, const float* x,
-        //   const float beta, float* y)
-        // LOG(FATAL) << "invoked scale_layer.cu ln104."
-
-        LOG(INFO) << "Before invoke my caffe_gpu_gemv in scale_layer.cu\n";
-        caffe_gpu_gemv(product, sum_mult, sum_result, sum_result_.count(), inner_dim_, Dtype(1));
+        kk_gpu_gemv<Dtype>(product, sum_mult, sum_result, sum_result_.count(), inner_dim_, Dtype(1), false);
       }
       if (outer_dim_ != 1) {
         const Dtype* sum_mult = sum_multiplier_.gpu_data();
@@ -113,23 +109,18 @@ void ScaleLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
           Dtype* scale_diff = scale->mutable_cpu_diff();
           if (scale_param) {
             Dtype result;
-            caffe_gpu_dot(outer_dim_, sum_mult, sum_result, &result);
+            // caffe_gpu_dot(outer_dim_, sum_mult, sum_result, &result);
+            kk_gpu_dot(inner_dim_, product, sum_mult, scale_diff);
             *scale_diff += result;
           } else {
-            caffe_gpu_dot(outer_dim_, sum_mult, sum_result, scale_diff);
+            // caffe_gpu_dot(outer_dim_, sum_mult, sum_result, scale_diff);
+            kk_gpu_dot(outer_dim_, sum_mult, sum_result, scale_diff);
           }
         } else {
           Dtype* scale_diff = scale->mutable_gpu_diff();
-          // LOG(INFO) << "Before invoke caffe_gpu_gemv in scale_layer.cu\n";
-          // caffe_gpu_gemv(CblasTrans, outer_dim_, scale_dim_,
-          //                Dtype(1), sum_result, sum_mult, Dtype(scale_param),
-          //                scale_diff);
-          // caffe_gpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int M,
-          //   const int N, const float alpha, const float* A, const float* x,
-          //   const float beta, float* y)
-
-          LOG(INFO) << "Before invoke my caffe_gpu_gemv in scale_layer.cu\n";
-          caffe_gpu_gemv(sum_result, sum_mult, scale_diff, outer_dim_, scale_dim_, Dtype(1));
+          caffe_gpu_gemv(CblasTrans, outer_dim_, scale_dim_,
+                         Dtype(1), sum_result, sum_mult, Dtype(scale_param),
+                         scale_diff);
         }
       }
     }

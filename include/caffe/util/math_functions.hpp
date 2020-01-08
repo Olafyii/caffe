@@ -35,7 +35,15 @@ void caffe_gpu_gemm(const int M, const int N, const int K,
 template<typename T>
 __global__ void matvec_kernel_ILP2(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols, const T alpha);
 template <typename T>
-void caffe_gpu_gemv(const T* dA, const T* dx, T* dy, const unsigned int nRows, const unsigned int nCols, const T alpha);
+void kk_gpu_gemv(const T* dA, const T* dx, T* dy, const unsigned int nRows, const unsigned int nCols, const T alpha, const bool trans);
+template <typename T>
+void kk_gpu_dot(const int N, const T* X, const T* Y, T* res);
+template <typename T>
+void kk_gpu_axpby(const int N, const T alpha, const T beta, const T* X, T* Y);
+template <typename T>
+void kk_gpu_scale(const int N, const T alpha, T* X);
+template <typename T>
+void kk_gpu_axpy(const int N, const T alpha, const T* X, T* Y);
 //-------------------------------------------------------------------------------------------------------------------------------------------
 
 
